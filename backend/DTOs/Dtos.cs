@@ -30,8 +30,8 @@ public record MemberDto(int Id, UserDto User, string Role, DateTime JoinedAt);
 public record CreateTaskDto(
     string Title,
     string? Description,
-    string Status,
-    string Priority,
+    string? Status,
+    string? Priority,
     DateTime? DueDate,
     int? AssignedToId
 );
