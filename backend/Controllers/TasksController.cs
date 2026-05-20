@@ -84,8 +84,22 @@ public class TasksController(ITaskService taskService) : ControllerBase
     [HttpGet("tasks")]
     public async Task<IActionResult> GetDashboardTasks()
     {
-        var stats = await taskService.GetDashboardStatsAsync(UserId, UserRole);
-        return Ok(stats.RecentTasks);
+        var tasks = await taskService.GetAllTasksAsync(UserId, UserRole);
+        return Ok(tasks);
+    }
+
+    // POST /api/tasks
+    [HttpPost("tasks")]
+    public async Task<IActionResult> CreateWithoutProject([FromBody] CreateTaskDto dto)
+    {
+        try
+        {
+            var task = await taskService.CreateTaskWithoutProjectAsync(dto, UserId, UserRole);
+            return CreatedAtAction(nameof(GetById), new { id = task.Id }, task);
+        }
+        catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+        catch (UnauthorizedAccessException ex) { return Forbid(); }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
     }
 
     // GET /api/dashboard

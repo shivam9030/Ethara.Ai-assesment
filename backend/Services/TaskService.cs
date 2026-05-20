@@ -10,8 +10,10 @@ public interface ITaskService
     Task<IEnumerable<TaskDto>> GetTasksByProjectAsync(int projectId, int userId, string userRole);
     Task<TaskDto> GetTaskByIdAsync(int taskId, int userId, string userRole);
     Task<TaskDto> CreateTaskAsync(int projectId, CreateTaskDto dto, int creatorId, string userRole);
+    Task<TaskDto> CreateTaskWithoutProjectAsync(CreateTaskDto dto, int creatorId, string userRole);
     Task<TaskDto> UpdateTaskAsync(int taskId, UpdateTaskDto dto, int userId, string userRole);
     Task DeleteTaskAsync(int taskId, int userId, string userRole);
+    Task<IEnumerable<TaskDto>> GetAllTasksAsync(int userId, string userRole);
     Task<DashboardStatsDto> GetDashboardStatsAsync(int userId, string userRole);
 }
 
@@ -80,8 +82,8 @@ public class TaskService(AppDbContext db) : ITaskService
         if (!await CanAccessProjectAsync(projectId, creatorId, userRole))
             throw new UnauthorizedAccessException("You are not a member of this project.");
 
-        var status = ValidStatuses.Contains(dto.Status) ? dto.Status : "Pending";
-        var priority = ValidPriorities.Contains(dto.Priority) ? dto.Priority : "Medium";
+        var status = (dto.Status != null && ValidStatuses.Contains(dto.Status)) ? dto.Status : "Pending";
+        var priority = (dto.Priority != null && ValidPriorities.Contains(dto.Priority)) ? dto.Priority : "Medium";
 
         // Validate assignee is a project member
         if (dto.AssignedToId.HasValue)
@@ -108,6 +110,44 @@ public class TaskService(AppDbContext db) : ITaskService
         await db.SaveChangesAsync();
 
         return ToDto(await TasksWithIncludes().FirstAsync(t => t.Id == task.Id));
+    }
+
+    public async Task<TaskDto> CreateTaskWithoutProjectAsync(CreateTaskDto dto, int creatorId, string userRole)
+    {
+        // Find the first project this user has access to
+        var pm = await db.ProjectMembers
+            .FirstOrDefaultAsync(pm => pm.UserId == creatorId);
+
+        int projectId;
+        if (pm == null)
+        {
+            // If the user has no projects, create a default one for them
+            var project = new Project
+            {
+                Name = "General Project",
+                Description = "Auto-generated project for quick tasks",
+                OwnerId = creatorId
+            };
+            db.Projects.Add(project);
+            await db.SaveChangesAsync();
+
+            var member = new ProjectMember
+            {
+                ProjectId = project.Id,
+                UserId = creatorId,
+                Role = "Admin"
+            };
+            db.ProjectMembers.Add(member);
+            await db.SaveChangesAsync();
+
+            projectId = project.Id;
+        }
+        else
+        {
+            projectId = pm.ProjectId;
+        }
+
+        return await CreateTaskAsync(projectId, dto, creatorId, userRole);
     }
 
     public async Task<TaskDto> UpdateTaskAsync(int taskId, UpdateTaskDto dto, int userId, string userRole)
@@ -158,6 +198,23 @@ public class TaskService(AppDbContext db) : ITaskService
 
         db.Tasks.Remove(task);
         await db.SaveChangesAsync();
+    }
+
+    public async Task<IEnumerable<TaskDto>> GetAllTasksAsync(int userId, string userRole)
+    {
+        var projectIds = userRole == "Admin"
+            ? await db.Projects.Select(p => p.Id).ToListAsync()
+            : await db.ProjectMembers
+                .Where(pm => pm.UserId == userId)
+                .Select(pm => pm.ProjectId)
+                .ToListAsync();
+
+        var tasks = await TasksWithIncludes()
+            .Where(t => projectIds.Contains(t.ProjectId))
+            .OrderByDescending(t => t.CreatedAt)
+            .ToListAsync();
+
+        return tasks.Select(ToDto);
     }
 
     //  Dashboard ─
